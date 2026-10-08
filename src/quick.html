@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+  <title>Quick add</title>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="quick.css">
+</head>
+<body>
+  <div class="qcard" id="qcard">
+    <div class="qdrag"></div>
+    <div class="seg" id="seg" role="tablist">
+      <button data-type="tasks" class="on" role="tab">Task</button>
+      <button data-type="followups" role="tab">Follow up</button>
+      <button data-type="vulns" role="tab">Vulnerability</button>
+    </div>
+    <input type="text" id="q-title" class="qtitle" autocomplete="off" spellcheck="false" placeholder="What needs doing">
+    <div class="qrow">
+      <select id="q-co" aria-label="Company"></select>
+      <select id="q-sev" aria-label="Severity" hidden></select>
+      <button type="button" class="datefield" id="q-date"></button>
+    </div>
+    <div class="qfoot">
+      <span class="qhint" id="q-hint">Return to add, Esc to close</span>
+      <button class="btn primary" id="q-add">Add task</button>
+    </div>
+  </div>
+  <script src="shared.js"></script>
+  <script src="quick.js"></script>
+</body>
+</html>
