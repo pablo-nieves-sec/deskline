@@ -59,6 +59,28 @@ GitHub Actions builds Mac, Windows, and Linux installers and attaches them to a 
 
 You can also run the workflow by hand from the Actions tab.
 
+## Web version
+
+The same app runs in any browser and keeps your data online, so no install is needed. The app itself is hosted on GitHub Pages. Your data is one JSON file in a separate private GitHub repository.
+
+### One time setup
+
+1. GitHub Pages on a free account needs a public repository. The `deskline` repository contains only code, no data and no secrets, so it is safe to make public. In the repository go to Settings, scroll to the Danger Zone, and choose Change visibility. A GitHub Pro or Team plan can keep it private.
+2. In the repository go to Settings, then Pages, and set Source to GitHub Actions.
+3. Push the project. The Deploy web version workflow runs and publishes the site. Your address is `https://YOUR_USERNAME.github.io/deskline/`. You can find the exact link in the Actions run.
+4. Create a second repository for your data. Make it **private**, name it `deskline_data`, and tick Add a README file.
+5. Create a token for it. Open GitHub Settings, Developer settings, Personal access tokens, Fine grained tokens, Generate new token. Set Repository access to Only select repositories and pick `deskline_data`. Under Repository permissions set Contents to Read and write.
+6. Open your Deskline address. It asks for your username, the data repository name, and the token. Paste them once per browser.
+
+### Notes
+
+* The token is stored only in that browser and can only reach the one data repository.
+* Changes save a few seconds after you make them. The pill in the corner shows Saving, Saved to GitHub, or an error with automatic retry.
+* The quick add window opens as a small popup from the sidebar button or Alt+Shift+A. Allow popups for the site if your browser blocks it.
+* Other devices pick up changes when you switch back to the tab and about every 45 seconds. If two devices edit at the same moment, new items from both are kept. A deletion made on one device can be undone by a simultaneous edit on another.
+* Data from the desktop app moves over with Export backup on the desktop and Import backup on the web.
+* Check that your company allows security data in a private GitHub repository before using it for client work.
+
 ## Mac notes
 
 * The release has two dmg files. Use the one ending in arm64 for Apple Silicon (M1 and newer) and the one ending in x64 for Intel Macs.
@@ -98,7 +120,8 @@ A vulnerability is due its discovered date plus the days set for its severity on
 ```
 main.js        Electron main process, tray, shortcut, storage
 preload.js     Safe bridge between the windows and main
-src/           Full window and quick add window
+src/           Full window and quick add window (shared by desktop and web)
+web/           Web version pages and the GitHub storage bridge
 assets/        Tray icons
 build/         App icon used by the installers
 .github/       Release workflow

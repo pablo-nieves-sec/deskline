@@ -94,9 +94,13 @@
       return '<button data-go="' + it[0] + '" class="' + (S.tab === it[0] ? 'on' : '') + '">' + icon(it[1], 18) + '<span>' + TITLES[it[0]] + '</span>' + c + '</button>';
     }).join('');
     var sample = hasSample() ? '<button data-act="clear-sample">' + icon('trash', 16) + 'Remove sample data</button>' : '';
+    var quickBtn = api.web ? '<button data-act="quick">' + icon('plus', 16) + 'Quick add window</button>' : '';
+    var disc = api.web ? '<button data-act="disconnect">' + icon('undo', 16) + 'Disconnect GitHub</button>' : '';
+    var tip = api.web ? 'Open quick add in a small window with the button above or Alt+Shift+A.' :
+      'Quick add from anywhere with the tray icon or ' + (api.platform === 'darwin' ? 'Cmd' : 'Ctrl') + '+Shift+A.';
     return '<div class="brand"><div class="mark">' + icon('check', 16) + '</div>Deskline</div><nav class="nav">' + nav + '</nav>' +
-      '<div class="side-foot">' + sample + '<button data-act="export">' + icon('download', 16) + 'Export backup</button><button data-act="import">' + icon('upload', 16) + 'Import backup</button>' +
-      '<div class="tip">Quick add from anywhere with the tray icon or ' + (api.platform === 'darwin' ? 'Cmd' : 'Ctrl') + '+Shift+A.</div></div>';
+      '<div class="side-foot">' + sample + quickBtn + '<button data-act="export">' + icon('download', 16) + 'Export backup</button><button data-act="import">' + icon('upload', 16) + 'Import backup</button>' + disc +
+      '<div class="tip">' + tip + '</div></div>';
   }
 
   function topbar() {
@@ -372,7 +376,7 @@
       if (!name) return err('Enter a company name.');
       var sla = {};
       SEV.forEach(function (s) { sla[s] = Math.max(1, parseInt(g('f-sla-' + s), 10) || D.DEFAULT_SLA[s]); });
-      var c = { id: D.uid(), name: name, sla: sla };
+      var c = { id: D.uid(), name: name, sla: sla, created: Date.now() };
       S.data.companies.push(c);
       S.company = 'all';
       closeModal();
@@ -549,6 +553,8 @@
     else if (act === 'clear-sample') { if (confirm('Remove all sample companies and items?')) clearSample(); }
     else if (act === 'toggle-done') { S.showDone = !S.showDone; render(); }
     else if (act === 'comp-add') addFromComposer();
+    else if (act === 'quick') api.openQuick();
+    else if (act === 'disconnect') { if (confirm('Disconnect this browser from GitHub? Your data stays in the repository.')) api.disconnect(); }
     else if (act === 'export') api.exportData();
     else if (act === 'import') api.importData().then(function (d) { if (d) { S.data = d; render(); } });
   });
@@ -590,6 +596,7 @@
       if (M && e.target.tagName === 'INPUT') { e.preventDefault(); saveModal(); }
       else if (e.target.id === 'comp-title') { e.preventDefault(); addFromComposer(); }
     }
+    if (api.web && e.altKey && e.shiftKey && e.code === 'KeyA') { e.preventDefault(); api.openQuick(); return; }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !M) { e.preventDefault(); newForTab(); }
   });
 

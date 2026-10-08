@@ -63,6 +63,9 @@
       hint('Added', 'ok');
       $('#q-title').value = '';
       setTimeout(function () { api.hideQuick(); }, 450);
+    }).catch(function () {
+      busy = false;
+      hint('Could not save. Check your connection', 'err');
     });
   }
 
