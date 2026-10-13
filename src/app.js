@@ -15,7 +15,7 @@
   var M = null;
   var $ = function (s) { return document.querySelector(s); };
 
-  var PAL = ['#ff9f0a', '#64d2ff', '#bf5af2', '#30d158', '#ff375f', '#ffd60a', '#5e5ce6', '#ac8e68'];
+  var PAL = ['#b283ff', '#64d2ff', '#ff9f0a', '#30d158', '#ff375f', '#ffd60a', '#5e5ce6', '#ac8e68'];
   var TITLES = { dashboard: 'Dashboard', vulns: 'Vulnerabilities', slas: 'SLAs', tasks: 'Tasks', followups: 'Follow ups' };
   var KIND = { vulns: 'Vuln', tasks: 'Task', followups: 'Follow up' };
 
