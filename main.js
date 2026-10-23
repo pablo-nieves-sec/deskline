@@ -4,7 +4,7 @@ const fs = require('fs');
 
 const SHORTCUT = 'CommandOrControl+Shift+A';
 const KINDS = ['vulns', 'tasks', 'followups'];
-const QUICK_W = 460;
+const QUICK_W = 480;
 
 let data = emptyData();
 let mainWin = null;
@@ -58,16 +58,16 @@ function webPrefs() {
 
 function createMain() {
   const opts = {
-    width: 1360, height: 900, minWidth: 980, minHeight: 640,
-    backgroundColor: '#050506', show: false, title: 'Deskline',
+    width: 1360, height: 900, minWidth: 940, minHeight: 640,
+    backgroundColor: '#060814', show: false, title: 'Deskline',
     webPreferences: webPrefs()
   };
   if (process.platform === 'darwin') {
     opts.titleBarStyle = 'hiddenInset';
-    opts.trafficLightPosition = { x: 18, y: 18 };
+    opts.trafficLightPosition = { x: 20, y: 20 };
   } else if (process.platform === 'win32') {
     opts.titleBarStyle = 'hidden';
-    opts.titleBarOverlay = { color: '#050506', symbolColor: '#9b9ba3', height: 64 };
+    opts.titleBarOverlay = { color: '#060814', symbolColor: '#cfd2e6', height: 40 };
   }
   mainWin = new BrowserWindow(opts);
   mainWin.loadFile(path.join(__dirname, 'src', 'index.html'));

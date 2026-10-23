@@ -18,6 +18,22 @@
   function fmtFull(s) {
     return s ? parse(s).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : '';
   }
+  function fmtDay(s) {
+    return s ? parse(s).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }) : '';
+  }
+  function weekStart(s) { return addDays(s, -parse(s).getDay()); }
+  var toastTimer = null;
+  function toast(msg, actionLabel, onAction) {
+    var el = document.getElementById('dl-toast');
+    if (!el) { el = document.createElement('div'); el.id = 'dl-toast'; el.className = 'toast'; document.body.appendChild(el); }
+    el.innerHTML = '<span></span>' + (actionLabel ? '<button type="button">' + esc(actionLabel) + '</button>' : '');
+    el.firstChild.textContent = msg;
+    function hide() { el.classList.remove('show'); }
+    if (actionLabel) el.querySelector('button').onclick = function () { hide(); if (onAction) onAction(); };
+    requestAnimationFrame(function () { el.classList.add('show'); });
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hide, 5500);
+  }
   function relDue(s) {
     if (!s) return 'No date';
     var d = diffDays(s, today());
@@ -54,7 +70,9 @@
     undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
     down: '<path d="M6 9l6 6 6-6"/>',
     download: '<path d="M12 4v12M7 11l5 5 5-5M5 20h14"/>',
-    upload: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>'
+    upload: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'
   };
   function icon(name, size) {
     var s = size || 16;
@@ -153,7 +171,7 @@
 
   window.DL = {
     iso: iso, parse: parse, today: today, addDays: addDays, diffDays: diffDays,
-    fmtShort: fmtShort, fmtFull: fmtFull, relDue: relDue, esc: esc, uid: uid,
+    fmtShort: fmtShort, fmtFull: fmtFull, fmtDay: fmtDay, weekStart: weekStart, toast: toast, relDue: relDue, esc: esc, uid: uid,
     SEV: SEV, SEV_LABEL: SEV_LABEL, DEFAULT_SLA: DEFAULT_SLA, MONTHS: MONTHS,
     icon: icon, calHTML: calHTML, showPopover: showPopover, closePopover: closePopover, openPicker: openPicker
   };

@@ -126,3 +126,8 @@ assets/        Tray icons
 build/         App icon used by the installers
 .github/       Release workflow
 ```
+
+
+## Look and navigation
+
+The app uses a glass on aurora look. The dashboard has no tab row. Click the Deskline logo to open the menu (all pages, sample data, backup, quick add window). The tiles, hero card and SLA card are also clickable, and a tab row appears on every other page. The calendar shows two weeks, with arrows on hover to move. Search or add anything in the top bar, press Return to add the text as a task, and use Cmd or Ctrl+K to focus it.

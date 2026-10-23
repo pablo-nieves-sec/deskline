@@ -4,31 +4,37 @@
   var icon = D.icon, SEV = D.SEV, SEV_LABEL = D.SEV_LABEL;
   var api = window.deskline;
 
-  document.body.classList.add(api.platform === 'darwin' ? 'mac' : api.platform === 'win32' ? 'win' : 'linux');
+  document.body.classList.add(api.platform === 'darwin' ? 'mac' : api.platform === 'win32' ? 'win' : 'other');
 
-  var now = new Date();
   var S = {
     data: { companies: [], vulns: [], tasks: [], followups: [] },
-    tab: 'dashboard', company: 'all', vf: 'open', showDone: false,
-    calY: now.getFullYear(), calM: now.getMonth(), calSel: today()
+    tab: 'dashboard', company: 'all', vf: 'open', showDone: false, weekOff: 0,
+    draft: { title: '', co: null, due: '' }
   };
   var M = null;
+  var SR = { rows: [], idx: -1 };
+  var topSig = null;
   var $ = function (s) { return document.querySelector(s); };
 
-  var PAL = ['#b283ff', '#64d2ff', '#ff9f0a', '#30d158', '#ff375f', '#ffd60a', '#5e5ce6', '#ac8e68'];
+  var PAL = ['#b283ff', '#6cc8ff', '#ffa05c', '#5ee08a', '#ff6fa0', '#ffd75e', '#7c8cff', '#c9a27a'];
+  var SEVCOL = { critical: '#ff7468', high: '#ffa05c', medium: '#ffd75e', low: '#6cc8ff' };
   var TITLES = { dashboard: 'Dashboard', vulns: 'Vulnerabilities', slas: 'SLAs', tasks: 'Tasks', followups: 'Follow ups' };
   var KIND = { vulns: 'Vuln', tasks: 'Task', followups: 'Follow up' };
+  var NEWLABEL = { vulns: 'Vulnerability added', tasks: 'Task added', followups: 'Follow up added', company: 'Company added' };
 
   function co(id) { return S.data.companies.find(function (c) { return c.id === id; }); }
   function coName(id) { var c = co(id); return c ? c.name : 'No company'; }
   function coColor(id) {
     var i = S.data.companies.findIndex(function (c) { return c.id === id; });
-    return i < 0 ? '#67676f' : PAL[i % PAL.length];
+    return i < 0 ? '#8a8d9c' : PAL[i % PAL.length];
   }
   function coChip(id) {
     return '<span class="co"><i style="background:' + coColor(id) + '"></i>' + esc(coName(id)) + '</span>';
   }
   function inScope(x) { return S.company === 'all' || x.companyId === S.company; }
+  function isOpen(v) { return v.status === 'open'; }
+  function notDone(x) { return !x.done; }
+  function hasAnyData() { return ['companies', 'vulns', 'tasks', 'followups'].some(function (k) { return S.data[k].length > 0; }); }
 
   function slaDays(v) {
     var c = co(v.companyId);
@@ -49,6 +55,7 @@
     if (d <= 3) return { k: 'soon', t: 'Due soon', d: d };
     return { k: 'ok', t: 'On track', d: d };
   }
+  function isBreached(v) { return vStatus(v).k === 'breached'; }
   function sevChip(s) { return '<span class="chip sev-' + s + '">' + SEV_LABEL[s] + '</span>'; }
   function stChip(v) { var s = vStatus(v); return '<span class="chip st-' + s.k + '">' + s.t + '</span>'; }
   function vSort(a, b) {
@@ -72,48 +79,59 @@
   function persist() { api.save(S.data); render(); }
   function saveQuiet() { api.save(S.data); }
 
+  var SHELL = '<div class="dragbar"></div><div class="shell"><header class="top" id="top"></header><div class="subnav" id="subnav"></div><main id="page"></main></div>';
+
   function render() {
-    var main = '<aside class="side">' + sidebar() + '</aside><main class="main">' + topbar() + '<div class="page">' + page() + '</div></main>';
-    var scroll = $('.main') ? $('.main').scrollTop : 0;
-    $('#app').innerHTML = main;
-    if ($('.main')) $('.main').scrollTop = scroll;
+    if (!$('#page')) { $('#app').innerHTML = SHELL; topSig = null; }
+    var ae = document.activeElement;
+    var keep = ae && ae.id && $('#page').contains(ae) ? { id: ae.id, s: ae.selectionStart, e: ae.selectionEnd } : null;
+    var sig = [S.tab, S.company, S.data.companies.map(function (c) { return c.id + ':' + c.name; }).join('|')].join('~');
+    if (sig !== topSig) { topSig = sig; $('#top').innerHTML = topHTML(); }
+    $('#subnav').innerHTML = subnavHTML();
+    var se = document.scrollingElement;
+    var st = se ? se.scrollTop : 0;
+    $('#page').innerHTML = pageHTML();
+    if (se) se.scrollTop = st;
+    if (keep) {
+      var el = document.getElementById(keep.id);
+      if (el) { el.focus(); try { el.setSelectionRange(keep.s, keep.e); } catch (err) {} }
+    }
   }
 
-  function sidebar() {
-    var sc = scoped();
-    var openV = sc.v.filter(function (v) { return v.status === 'open'; });
-    var breached = openV.filter(function (v) { return vStatus(v).k === 'breached'; }).length;
-    var counts = {
-      vulns: breached ? '<span class="count warn">' + breached + '</span>' : (openV.length ? '<span class="count">' + openV.length + '</span>' : ''),
-      tasks: sc.t.filter(function (x) { return !x.done; }).length,
-      followups: sc.f.filter(function (x) { return !x.done; }).length
-    };
-    var items = [['dashboard', 'dash'], ['vulns', 'shield'], ['slas', 'timer'], ['tasks', 'check'], ['followups', 'reply']];
-    var nav = items.map(function (it) {
-      var c = it[0] === 'vulns' ? counts.vulns : (counts[it[0]] ? '<span class="count">' + counts[it[0]] + '</span>' : '');
-      return '<button data-go="' + it[0] + '" class="' + (S.tab === it[0] ? 'on' : '') + '">' + icon(it[1], 18) + '<span>' + TITLES[it[0]] + '</span>' + c + '</button>';
-    }).join('');
-    var sample = hasSample() ? '<button data-act="clear-sample">' + icon('trash', 16) + 'Remove sample data</button>' : '';
-    var quickBtn = api.web ? '<button data-act="quick">' + icon('plus', 16) + 'Quick add window</button>' : '';
-    var disc = api.web ? '<button data-act="disconnect">' + icon('undo', 16) + 'Disconnect GitHub</button>' : '';
-    var tip = api.web ? 'Open quick add in a small window with the button above or Alt+Shift+A.' :
-      'Quick add from anywhere with the tray icon or ' + (api.platform === 'darwin' ? 'Cmd' : 'Ctrl') + '+Shift+A.';
-    return '<div class="brand"><div class="mark">' + icon('check', 16) + '</div>Deskline</div><nav class="nav">' + nav + '</nav>' +
-      '<div class="side-foot">' + sample + quickBtn + '<button data-act="export">' + icon('download', 16) + 'Export backup</button><button data-act="import">' + icon('upload', 16) + 'Import backup</button>' + disc +
-      '<div class="tip">' + tip + '</div></div>';
+  function go(tab) {
+    S.tab = tab;
+    S.draft = { title: '', co: null, due: '' };
+    D.closePopover();
+    render();
+    window.scrollTo(0, 0);
   }
 
-  function topbar() {
+  function topHTML() {
     var opts = '<option value="all">All companies</option>' + S.data.companies.map(function (c) {
       return '<option value="' + c.id + '"' + (S.company === c.id ? ' selected' : '') + '>' + esc(c.name) + '</option>';
     }).join('');
-    var label = { dashboard: 'New', vulns: 'New vulnerability', slas: 'New company', tasks: 'New task', followups: 'New follow up' }[S.tab];
-    var sel = S.tab === 'slas' ? '' : '<select data-act="company" aria-label="Company filter">' + opts + '</select>';
-    return '<div class="topbar"><h1>' + TITLES[S.tab] + '</h1><div class="top-right">' + sel +
-      '<button class="btn primary" data-act="new">' + icon('plus', 15) + label + '</button></div></div>';
+    var sel = S.tab === 'slas' ? '' : '<select class="pill" data-act="company" aria-label="Company filter">' + opts + '</select>';
+    return '<button class="brand" data-act="menu" aria-label="Open the Deskline menu"><span class="mark">' + icon('check', 17) + '</span><span>Deskline</span></button>' +
+      '<div class="search" id="search"><div class="field">' + icon('search', 17) + '<input type="text" id="q" placeholder="Search or add anything" autocomplete="off" spellcheck="false" aria-label="Search or add anything"></div><div class="search-pop" id="search-pop" hidden></div></div>' +
+      '<div class="top-right">' + sel + '<button class="btn white" data-act="new" aria-label="Create something new">New</button></div>';
   }
 
-  function page() {
+  function subnavHTML() {
+    if (S.tab === 'dashboard') return '';
+    var sc = scoped();
+    var openV = sc.v.filter(isOpen);
+    var br = openV.filter(isBreached).length;
+    var cnt = {
+      vulns: br ? '<span class="cnt warn">' + br + '</span>' : (openV.length ? '<span class="cnt">' + openV.length + '</span>' : ''),
+      tasks: sc.t.filter(notDone).length ? '<span class="cnt">' + sc.t.filter(notDone).length + '</span>' : '',
+      followups: sc.f.filter(notDone).length ? '<span class="cnt">' + sc.f.filter(notDone).length + '</span>' : ''
+    };
+    return '<div class="seg" role="tablist">' + ['dashboard', 'vulns', 'slas', 'tasks', 'followups'].map(function (k) {
+      return '<button role="tab" data-go="' + k + '" class="' + (S.tab === k ? 'on' : '') + '">' + TITLES[k] + (cnt[k] || '') + '</button>';
+    }).join('') + '</div>';
+  }
+
+  function pageHTML() {
     if (S.tab === 'dashboard') return dashboardPage();
     if (S.tab === 'vulns') return vulnsPage();
     if (S.tab === 'slas') return slasPage();
@@ -128,101 +146,151 @@
     var late = !x.done && x.due && x.due < today();
     var who = kind === 'followups' && x.who ? '<span>With ' + esc(x.who) + '</span>' : '';
     return '<div class="row' + (x.done ? ' done' : '') + '" data-open="' + kind + ':' + x.id + '">' +
-      '<button class="check' + (x.done ? ' on' : '') + '" data-toggle="' + kind + ':' + x.id + '" aria-label="Mark ' + (x.done ? 'not done' : 'done') + '">' + (x.done ? icon('tick', 12) : '') + '</button>' +
+      '<button class="check' + (x.done ? ' on' : '') + '" data-toggle="' + kind + ':' + x.id + '" aria-label="Mark ' + (x.done ? 'not done' : 'done') + '">' + (x.done ? icon('tick', 13) : '') + '</button>' +
       '<div class="row-main"><div class="row-title">' + esc(x.title) + '</div><div class="row-sub">' + who + coChip(x.companyId) + '</div></div>' +
       '<span class="due' + (late ? ' late' : '') + '">' + (x.due ? relDue(x.due) : '') + '</span></div>';
   }
 
+  function tile(go, label, n, cls, sub, vf) {
+    return '<button class="tile" data-go="' + go + '"' + (vf ? ' data-vf="' + vf + '"' : '') + '><span class="t-label">' + label + '</span><span class="t-num ' + cls + '">' + n + '</span><span class="t-sub">' + sub + '</span></button>';
+  }
+
   function dashboardPage() {
-    var sc = scoped(), t = today(), week = addDays(t, 7);
-    if (!S.data.companies.length && !S.data.vulns.length && !S.data.tasks.length && !S.data.followups.length) {
-      return emptyState('Set up your first company', 'Add a company and its SLA targets, then log vulnerabilities, tasks, and follow ups against it. Not ready to type anything in yet? Load sample data to look around.',
-        '<button class="btn primary" data-act="newco">' + icon('plus', 15) + 'Add company</button><button class="btn" data-act="sample">Load sample data</button>');
+    var sc = scoped(), t = today();
+    var openV = sc.v.filter(isOpen);
+    var breached = openV.filter(isBreached);
+    var openT = sc.t.filter(notDone);
+    var openF = sc.f.filter(notDone);
+    var late = function (x) { return x.due && x.due < t; };
+    var odT = openT.filter(late).length, odF = openF.filter(late).length;
+    var overdue = odT + odF;
+    var banner = S.data.companies.length ? '' :
+      '<div class="card banner"><p><b>Start with a company.</b> Add its SLA targets and Deskline works out every vulnerability due date for you.</p><div class="btns"><button class="btn white" data-act="newco">Add company</button>' +
+      (hasAnyData() ? '' : '<button class="btn" data-act="sample">Load sample data</button>') + '</div></div>';
+    var tiles = '<div class="tiles">' +
+      tile('vulns', 'Vulnerabilities', openV.length, '', 'open', 'open') +
+      tile('vulns', 'SLA breached', breached.length, breached.length ? 'red' : '', breached.length ? 'past due' : 'nothing past due', 'breached') +
+      tile(odF > odT ? 'followups' : 'tasks', 'Overdue', overdue, overdue ? 'amber' : '', 'tasks, follow ups') +
+      tile('tasks', 'Tasks', openT.length, '', 'open') + '</div>';
+    return '<div class="dash">' + banner + heroCard(openF) + calCard(openV, openT, openF) + tiles + slaCard() + '</div>';
+  }
+
+  function heroCard(openF) {
+    var t = today();
+    var f = openF.slice().sort(dueSort)[0];
+    var top = '<div class="card-top"><span class="eyebrow">Next follow up</span><span class="r">' + D.fmtDay(t) + '</span></div>';
+    if (!f) {
+      return '<section class="card hero" data-go="followups">' + top +
+        '<div class="hero-main"><div class="big"><span class="n">0</span><span class="u">open</span></div><div class="hero-text"><div class="hero-title">Nothing to follow up on</div><div class="hero-sub">Add one and its due date shows up here.</div></div></div>' +
+        '<div class="hero-actions"><button class="btn white" data-act="new-followup">Add follow up</button></div></section>';
     }
-    var openV = sc.v.filter(function (v) { return v.status === 'open'; });
-    var breached = openV.filter(function (v) { return vStatus(v).k === 'breached'; });
-    var soon = openV.filter(function (v) { return vStatus(v).k === 'soon'; });
-    var openT = sc.t.filter(function (x) { return !x.done; });
-    var openF = sc.f.filter(function (x) { return !x.done; });
-    var both = openT.concat(openF);
-    var overdue = both.filter(function (x) { return x.due && x.due < t; }).length;
-    var dueWeek = both.filter(function (x) { return x.due && x.due >= t && x.due <= week; }).length +
-      openV.filter(function (v) { var d = effDue(v); return d && d >= t && d <= week; }).length;
+    var days = f.due ? diffDays(f.due, t) : null;
+    var big;
+    if (days === null) big = '<span class="n word">Open</span>';
+    else if (days === 0) big = '<span class="n word">Today</span>';
+    else if (days > 0) big = '<span class="n">' + days + '</span><span class="u">' + (days === 1 ? 'day' : 'days') + '</span>';
+    else big = '<span class="n late">' + (-days) + '</span><span class="u late">' + (days === -1 ? 'day overdue' : 'days overdue') + '</span>';
+    var parts = [];
+    if (f.companyId) parts.push(esc(coName(f.companyId)));
+    if (f.who) parts.push('with ' + esc(f.who));
+    parts.push(f.due ? (days < 0 ? 'was due ' : 'until ') + fmtShort(f.due) : 'no date');
+    return '<section class="card hero" data-open="followups:' + f.id + '">' + top +
+      '<div class="hero-main"><div class="big">' + big + '</div><div class="hero-text"><div class="hero-title">' + esc(f.title) + '</div><div class="hero-sub">' + parts.join(' · ') + '</div></div></div>' +
+      '<div class="hero-actions"><button class="btn white" data-act="hero-done" data-id="' + f.id + '">Mark done</button><button class="btn soft" data-act="hero-snooze" data-id="' + f.id + '">Snooze</button></div></section>';
+  }
 
-    var tiles = '<div class="grid g-tiles">' +
-      '<button class="tile" data-go="vulns"><div class="lbl">Open vulnerabilities</div><div class="num">' + openV.length + '</div><div class="note">' + soon.length + ' due within 3 days</div></button>' +
-      '<button class="tile" data-go="vulns" data-vf="breached"><div class="lbl">SLA breached</div><div class="num' + (breached.length ? ' red' : '') + '">' + breached.length + '</div><div class="note">' + (breached.length ? 'Past their due date' : 'Nothing past due') + '</div></button>' +
-      '<button class="tile" data-go="tasks"><div class="lbl">Overdue tasks and follow ups</div><div class="num' + (overdue ? ' amber' : '') + '">' + overdue + '</div><div class="note">' + openT.length + ' tasks, ' + openF.length + ' follow ups open</div></button>' +
-      '<div class="tile"><div class="lbl">Due in the next 7 days</div><div class="num">' + dueWeek + '</div><div class="note">Across vulns, tasks, follow ups</div></div></div>';
+  function monthLabel(a, b) {
+    var da = D.parse(a), db = D.parse(b);
+    var ma = D.MONTHS[da.getMonth()], mb = D.MONTHS[db.getMonth()];
+    if (da.getMonth() === db.getMonth() && da.getFullYear() === db.getFullYear()) return ma + ' ' + da.getFullYear();
+    if (da.getFullYear() === db.getFullYear()) return ma.slice(0, 3) + ' to ' + mb.slice(0, 3) + ' ' + da.getFullYear();
+    return ma.slice(0, 3) + ' ' + da.getFullYear() + ' to ' + mb.slice(0, 3) + ' ' + db.getFullYear();
+  }
 
-    var cos = S.data.companies.filter(function (c) { return S.company === 'all' || c.id === S.company; });
-    var slaHtml = cos.length ? '<div class="sla-list">' + cos.map(slaBlock).join('') + '</div>' :
-      '<div class="empty-line">Add a company on the SLAs tab to see compliance here.</div>';
-    var slaCard = '<div class="card"><div class="card-h"><h2>SLA health</h2><span class="sub">Open and fixed vulns, per company</span></div>' + slaHtml + '</div>';
-
+  function calCard(openV, openT, openF) {
+    var t = today();
+    var start = addDays(D.weekStart(t), 7 * S.weekOff);
+    var end = addDays(start, 13);
     var marks = {};
-    function mk(d) { if (d) marks[d] = (marks[d] || 0) + 1; }
+    function mk(d) {
+      if (!d) return;
+      var m = marks[d] || (marks[d] = { n: 0, late: false });
+      m.n++;
+      if (d < t) m.late = true;
+    }
     openT.forEach(function (x) { mk(x.due); });
     openF.forEach(function (x) { mk(x.due); });
     openV.forEach(function (v) { mk(effDue(v)); });
-    var dayItems = [];
-    openV.forEach(function (v) { if (effDue(v) === S.calSel) dayItems.push(['Vuln', v.title]); });
-    openT.forEach(function (x) { if (x.due === S.calSel) dayItems.push(['Task', x.title]); });
-    openF.forEach(function (x) { if (x.due === S.calSel) dayItems.push(['Follow up', x.title]); });
-    var dayHtml = dayItems.length ? dayItems.slice(0, 6).map(function (i) {
-      return '<div class="day-item"><span class="k">' + i[0] + '</span><span class="t">' + esc(i[1]) + '</span></div>';
-    }).join('') + (dayItems.length > 6 ? '<div class="day-item"><span class="k"></span><span class="t">' + (dayItems.length - 6) + ' more</span></div>' : '') :
-      '<div class="day-item"><span class="t" style="color:var(--tx3)">Nothing due</span></div>';
-    var calCard = '<div class="card mini-cal">' + D.calHTML(S.calY, S.calM, { sel: S.calSel, marks: marks }) +
-      '<div class="day-list"><div class="lbl">' + fmtFull(S.calSel) + '</div>' + dayHtml + '</div></div>';
-
-    var attention = openV.filter(function (v) { var k = vStatus(v).k; return k === 'breached' || k === 'soon'; }).sort(vSort).slice(0, 6);
-    var attHtml = attention.length ? '<div class="rows">' + attention.map(function (v) {
-      var st = vStatus(v);
-      var when = st.k === 'breached' ? (-st.d) + 'd over' : (st.d === 0 ? 'Today' : st.d + 'd left');
-      return '<div class="row" data-open="vulns:' + v.id + '"><span class="sev-dot" style="background:var(--sev-' + v.severity + ')"></span>' +
-        '<div class="row-main"><div class="row-title">' + esc(v.title) + '</div><div class="row-sub">' + coChip(v.companyId) + '</div></div>' +
-        '<span class="due' + (st.k === 'breached' ? ' late' : '') + '">' + when + '</span></div>';
-    }).join('') + '</div>' : '<div class="empty-line">No vulnerabilities are past due or close to it.</div>';
-
-    function listHtml(kind, items) {
-      var l = items.sort(dueSort).slice(0, 6);
-      return l.length ? '<div class="rows">' + l.map(function (x) { return checkRow(kind, x); }).join('') + '</div>' : '<div class="empty-line">All clear.</div>';
+    var letters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    var h = '<section class="card cal' + (S.weekOff ? ' shifted' : '') + '"><div class="card-top"><span class="eyebrow">Two weeks</span><span class="cal-r">' +
+      (S.weekOff ? '<button class="cal-today" data-act="week-today">Today</button>' : '') +
+      '<button class="cal-arrow" data-act="week-prev" aria-label="Previous week">' + icon('left', 15) + '</button>' + monthLabel(start, end) +
+      '<button class="cal-arrow" data-act="week-next" aria-label="Next week">' + icon('right', 15) + '</button></span></div><div class="strip">';
+    letters.forEach(function (l) { h += '<div class="dw">' + l + '</div>'; });
+    for (var i = 0; i < 14; i++) {
+      var s = addDays(start, i);
+      var m = marks[s];
+      h += '<button class="sd' + (s === t ? ' today' : '') + '" data-day="' + s + '" aria-label="' + esc(fmtFull(s)) + '">' + D.parse(s).getDate() +
+        (m ? '<i class="dot' + (m.late ? ' late' : '') + '"></i>' : '') + '</button>';
     }
-    var bottom = '<div class="grid g-bot">' +
-      '<div class="card"><div class="card-h"><h2>Needs attention</h2><span class="sub">Vulns</span></div>' + attHtml + '</div>' +
-      '<div class="card"><div class="card-h"><h2>Tasks</h2><span class="sub">' + openT.length + ' open</span></div>' + listHtml('tasks', openT.slice()) + '</div>' +
-      '<div class="card"><div class="card-h"><h2>Follow ups</h2><span class="sub">' + openF.length + ' open</span></div>' + listHtml('followups', openF.slice()) + '</div></div>';
-
-    return tiles + '<div class="grid g-mid">' + slaCard + calCard + '</div>' + bottom;
+    return h + '</div></section>';
   }
 
-  function slaBlock(c) {
-    var vs = S.data.vulns.filter(function (v) { return v.companyId === c.id && (v.status === 'open' || v.status === 'fixed'); });
-    var tracked = vs.filter(function (v) { return effDue(v); });
-    var ok = tracked.filter(function (v) {
-      var due = effDue(v);
-      if (v.status === 'fixed') return !v.fixedOn || v.fixedOn <= due;
-      return due >= today();
-    }).length;
-    var pct = tracked.length ? Math.round(ok / tracked.length * 100) : null;
-    var pctHtml = pct === null ? '<div class="pct" style="color:var(--tx3)">None<small>tracked</small></div>' :
-      '<div class="pct" style="color:' + (pct >= 90 ? 'var(--green)' : pct >= 70 ? 'var(--amber)' : 'var(--red)') + '">' + pct + '%<small>within SLA</small></div>';
-    var cells = SEV.map(function (s) {
-      var open = vs.filter(function (v) { return v.severity === s && v.status === 'open'; });
-      var br = open.filter(function (v) { return vStatus(v).k === 'breached'; }).length;
-      var days = c.sla ? c.sla[s] : '';
-      return '<div class="sev-cell"><div class="t"><i style="background:var(--sev-' + s + ')"></i>' + SEV_LABEL[s] + '</div><div class="n">' + open.length +
-        '</div><div class="b' + (br ? ' red' : '') + '">' + (br ? br + ' breached' : (days ? days + ' day SLA' : 'No SLA set')) + '</div></div>';
+  function dayPopover(btn, day) {
+    var items = [];
+    S.data.vulns.filter(inScope).forEach(function (v) { if (isOpen(v) && effDue(v) === day) items.push({ k: 'Vuln', ref: 'vulns:' + v.id, title: v.title }); });
+    S.data.tasks.filter(inScope).forEach(function (x) { if (!x.done && x.due === day) items.push({ k: 'Task', ref: 'tasks:' + x.id, title: x.title }); });
+    S.data.followups.filter(inScope).forEach(function (x) { if (!x.done && x.due === day) items.push({ k: 'Follow up', ref: 'followups:' + x.id, title: x.title }); });
+    var el = document.createElement('div');
+    el.className = 'popover daypop';
+    el.innerHTML = '<div class="dp-h">' + esc(fmtFull(day)) + '</div>' +
+      (items.length ? items.map(function (i) {
+        return '<div class="dp-row" data-dpopen="' + i.ref + '"><span class="k">' + i.k + '</span><span class="t">' + esc(i.title) + '</span></div>';
+      }).join('') : '<div class="dp-empty">Nothing due.</div>') +
+      '<div class="dp-add"><button class="btn sm" data-dpadd="tasks">Add task</button><button class="btn sm" data-dpadd="followups">Add follow up</button></div>';
+    el.addEventListener('click', function (e) {
+      var o = e.target.closest('[data-dpopen]');
+      if (o) { D.closePopover(); var r = splitRef(o.dataset.dpopen); return openModal(r.kind, r.id); }
+      var a = e.target.closest('[data-dpadd]');
+      if (a) { D.closePopover(); openModal(a.dataset.dpadd, null, { due: day }); }
+    });
+    D.showPopover(btn, el);
+  }
+
+  function ringSVG(frac, color) {
+    var c = 2 * Math.PI * 24;
+    var on = frac !== null && frac > 0;
+    return '<svg viewBox="0 0 56 56" width="58" height="58" aria-hidden="true"><circle cx="28" cy="28" r="24" fill="none" stroke="' + color + '" stroke-opacity="0.3" stroke-width="4.5"/>' +
+      (on ? '<circle cx="28" cy="28" r="24" fill="none" stroke="' + color + '" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="' + (c * frac).toFixed(1) + ' ' + c.toFixed(1) + '" transform="rotate(-90 28 28)"/>' :
+        '<circle cx="28" cy="4" r="2.8" fill="' + color + '"/>') + '</svg>';
+  }
+
+  function slaCard() {
+    var cos = S.data.companies.filter(function (c) { return S.company === 'all' || c.id === S.company; });
+    var items = SEV.map(function (s) {
+      var vs = S.data.vulns.filter(function (v) { return inScope(v) && v.severity === s && (v.status === 'open' || v.status === 'fixed'); });
+      var open = vs.filter(isOpen);
+      var br = open.filter(isBreached).length;
+      var tracked = vs.filter(function (v) { return effDue(v); });
+      var ok = tracked.filter(function (v) {
+        var due = effDue(v);
+        return v.status === 'fixed' ? (!v.fixedOn || v.fixedOn <= due) : due >= today();
+      }).length;
+      var frac = tracked.length ? ok / tracked.length : null;
+      var days = cos.map(function (c) { return c.sla ? Number(c.sla[s]) || 0 : 0; }).filter(Boolean);
+      var mn = Math.min.apply(null, days), mx = Math.max.apply(null, days);
+      var label = !days.length ? 'Not set' : (mn === mx ? mn + ' day SLA' : mn + ' to ' + mx + ' day SLA');
+      return '<div class="ring-item"><div class="ring">' + ringSVG(frac, SEVCOL[s]) + '<span class="ring-n">' + open.length + '</span></div>' +
+        '<div class="ring-txt"><b>' + SEV_LABEL[s] + '</b><span>' + label + '</span>' + (br ? '<span class="red">' + br + ' breached</span>' : '') + '</div></div>';
     }).join('');
-    return '<div class="sla-co"><div><div class="nm">' + coChip(c.id).replace('class="co"', 'class="co" style="font-size:13.5px;color:var(--tx);font-weight:600"') + '</div>' + pctHtml + '</div><div class="sev-grid">' + cells + '</div></div>';
+    return '<section class="card sla" data-go="slas"><div class="card-top"><span class="eyebrow">SLA health</span></div><div class="rings">' + items + '</div></section>';
   }
 
   function vulnsPage() {
     var all = S.data.vulns.filter(inScope);
     var F = {
-      open: function (v) { return v.status === 'open'; },
-      breached: function (v) { return vStatus(v).k === 'breached'; },
+      open: isOpen,
+      breached: isBreached,
       soon: function (v) { return vStatus(v).k === 'soon'; },
       fixed: function (v) { return v.status === 'fixed'; },
       all: function () { return true; }
@@ -237,29 +305,29 @@
       var due = effDue(v), st = vStatus(v);
       var rel = due && v.status === 'open' ? relDue(due) : '';
       var sub = rel && rel !== fmtShort(due) ? '<small class="' + (st.k === 'breached' ? 'late' : '') + '">' + rel + '</small>' : '';
-      return '<div class="vrow" data-open="vulns:' + v.id + '">' + '<span>' + sevChip(v.severity) + '</span>' +
+      return '<div class="vrow" data-open="vulns:' + v.id + '"><span>' + sevChip(v.severity) + '</span>' +
         '<span><div class="ttl">' + esc(v.title) + '</div>' + (v.cve ? '<div class="cve">' + esc(v.cve) + '</div>' : '') + '</span>' +
         '<span>' + coChip(v.companyId) + '</span><span class="dd">' + fmtShort(v.discovered) + '</span>' +
         '<span class="dd">' + (due ? fmtShort(due) : 'No SLA') + sub + '</span><span>' + stChip(v) + '</span>' +
         '<button class="icon-btn" data-fix="' + v.id + '" aria-label="' + (v.status === 'fixed' ? 'Reopen' : 'Mark fixed') + '" title="' + (v.status === 'fixed' ? 'Reopen' : 'Mark fixed') + '">' + icon(v.status === 'fixed' ? 'undo' : 'tick', 16) + '</button></div>';
     }).join('');
-    var body = list.length ? '<div class="vtable">' + head + rows + '</div>' :
-      emptyState(all.length ? 'Nothing in this view' : 'Log your first vulnerability', all.length ? 'Try another filter above.' : 'Add a finding and Deskline sets its due date from the company SLA.', all.length ? '' : '<button class="btn primary" data-act="new">' + icon('plus', 15) + 'New vulnerability</button>');
+    var body = list.length ? '<div class="card vtable">' + head + rows + '</div>' :
+      emptyState(all.length ? 'Nothing in this view' : 'Log your first vulnerability', all.length ? 'Try another filter above.' : 'Add a finding and Deskline sets its due date from the company SLA.', all.length ? '' : '<button class="btn white" data-act="new">New vulnerability</button>');
     return '<div class="filters">' + chips + '</div>' + body;
   }
 
   function slasPage() {
     var cs = S.data.companies;
     if (!cs.length) return emptyState('Add your first company', 'Every company gets its own SLA targets in days for each severity. Vulnerability due dates are calculated from them.',
-      '<button class="btn primary" data-act="newco">' + icon('plus', 15) + 'Add company</button>');
+      '<button class="btn white" data-act="newco">Add company</button>');
     var cards = cs.map(function (c) {
       var vs = S.data.vulns.filter(function (v) { return v.companyId === c.id && v.status === 'open'; });
-      var br = vs.filter(function (v) { return vStatus(v).k === 'breached'; }).length;
+      var br = vs.filter(isBreached).length;
       var ins = SEV.map(function (s) {
-        return '<div class="sla-in"><label><i style="background:var(--sev-' + s + ')"></i>' + SEV_LABEL[s] + '</label><div class="wrap"><input type="number" min="1" max="3650" value="' + (c.sla ? c.sla[s] : '') + '" data-sla="' + c.id + ':' + s + '" aria-label="' + SEV_LABEL[s] + ' SLA in days"><span class="u">days</span></div></div>';
+        return '<div class="sla-in"><label><i style="background:' + SEVCOL[s] + '"></i>' + SEV_LABEL[s] + '</label><div class="wrap"><input type="number" min="1" max="3650" value="' + (c.sla ? c.sla[s] : '') + '" data-sla="' + c.id + ':' + s + '" aria-label="' + SEV_LABEL[s] + ' SLA in days"><span class="u">days</span></div></div>';
       }).join('');
       return '<div class="card"><div class="co-head"><span class="dotc" style="background:' + coColor(c.id) + '"></span><input type="text" value="' + esc(c.name) + '" data-coname="' + c.id + '" aria-label="Company name">' +
-        '<button class="icon-btn" data-delco="' + c.id + '" aria-label="Delete company" title="Delete company">' + icon('trash', 16) + '</button></div>' +
+        '<button class="icon-btn del" data-delco="' + c.id + '" aria-label="Delete company" title="Delete company">' + icon('trash', 16) + '</button></div>' +
         '<div class="sla-inputs">' + ins + '</div><div class="co-foot"><span>' + vs.length + ' open</span><span style="color:' + (br ? 'var(--red)' : 'inherit') + '">' + br + ' breached</span></div></div>';
     }).join('');
     return '<p class="note-line">A vulnerability is due its discovery date plus the days below for its severity. Change a number and every open finding for that company recalculates.</p><div class="sla-cards">' + cards + '</div>';
@@ -277,26 +345,27 @@
 
   function listPage(kind) {
     var all = S.data[kind].filter(inScope);
-    var open = all.filter(function (x) { return !x.done; });
+    var open = all.filter(notDone);
     var done = all.filter(function (x) { return x.done; });
     var one = kind === 'tasks' ? 'task' : 'follow up';
     var defCo = S.company !== 'all' ? S.company : '';
+    var selCo = S.draft.co === null ? defCo : S.draft.co;
     var copts = '<option value="">No company</option>' + S.data.companies.map(function (c) {
-      return '<option value="' + c.id + '"' + (c.id === defCo ? ' selected' : '') + '>' + esc(c.name) + '</option>';
+      return '<option value="' + c.id + '"' + (c.id === selCo ? ' selected' : '') + '>' + esc(c.name) + '</option>';
     }).join('');
-    var composer = '<div class="composer"><input type="text" id="comp-title" placeholder="' + (kind === 'tasks' ? 'Add a task and press Return' : 'Who or what are you following up on') + '" aria-label="New ' + one + '">' +
+    var composer = '<div class="card composer"><input type="text" id="comp-title" value="' + esc(S.draft.title) + '" placeholder="' + (kind === 'tasks' ? 'Add a task and press Return' : 'Who or what are you following up on') + '" aria-label="New ' + one + '">' +
       '<select id="comp-co" aria-label="Company">' + copts + '</select>' +
-      '<button type="button" class="datefield" id="comp-due" data-val="">' + icon('cal', 16) + '<span class="ph">Due date</span></button>' +
-      '<button class="btn primary" data-act="comp-add">Add</button></div>';
+      '<button type="button" class="datefield" id="comp-due">' + icon('cal', 16) + '<span class="' + (S.draft.due ? '' : 'ph') + '">' + (S.draft.due ? fmtShort(S.draft.due) : 'Due date') + '</span></button>' +
+      '<button class="btn white" data-act="comp-add">Add</button></div>';
     var groups = groupItems(open).map(function (g) {
-      return '<div class="group-h' + (g[2] ? ' ' + g[2] : '') + '">' + g[0] + '<span class="n">' + g[1].length + '</span></div><div class="listcard"><div class="rows">' +
+      return '<div class="group-h' + (g[2] ? ' ' + g[2] : '') + '">' + g[0] + '<span class="n">' + g[1].length + '</span></div><div class="card listcard"><div class="rows">' +
         g[1].map(function (x) { return checkRow(kind, x); }).join('') + '</div></div>';
     }).join('');
     if (!open.length) groups = '<div class="empty-line">' + (all.length ? 'Everything is done.' : 'Nothing here yet. Add your first ' + one + ' above.') + '</div>';
     var doneHtml = '';
     if (done.length) {
       doneHtml = '<div class="group-h" style="cursor:pointer" data-act="toggle-done">' + icon('down', 14) + 'Completed<span class="n">' + done.length + '</span></div>';
-      if (S.showDone) doneHtml += '<div class="listcard"><div class="rows">' + done.sort(function (a, b) { return (b.doneOn || '') < (a.doneOn || '') ? -1 : 1; }).map(function (x) { return checkRow(kind, x); }).join('') + '</div></div>';
+      if (S.showDone) doneHtml += '<div class="card listcard"><div class="rows">' + done.sort(function (a, b) { return (b.doneOn || '') < (a.doneOn || '') ? -1 : 1; }).map(function (x) { return checkRow(kind, x); }).join('') + '</div></div>';
     }
     return composer + groups + doneHtml;
   }
@@ -309,12 +378,12 @@
     return { name: '', sla: Object.assign({}, D.DEFAULT_SLA) };
   }
 
-  function openModal(type, id) {
+  function openModal(type, id, preset) {
     var item = id && type !== 'company' ? S.data[type].find(function (x) { return x.id === id; }) : null;
-    M = { type: type, id: item ? item.id : null, v: item ? JSON.parse(JSON.stringify(item)) : blank(type) };
+    M = { type: type, id: item ? item.id : null, v: item ? JSON.parse(JSON.stringify(item)) : Object.assign(blank(type), preset || {}) };
     renderModal();
     var f = $('#f-title') || $('#f-name');
-    if (f) f.focus();
+    if (f) { f.focus(); try { f.setSelectionRange(f.value.length, f.value.length); } catch (err) {} }
   }
   function closeModal() { M = null; D.closePopover(); $('#modal-root').innerHTML = ''; }
 
@@ -333,7 +402,7 @@
     if (t === 'company') {
       h = '<h2>New company</h2>' + fld('Name', '<input type="text" id="f-name" placeholder="Acme Corp">') +
         '<div class="fld"><label>SLA targets in days</label><div class="sla-inputs">' + SEV.map(function (s) {
-          return '<div class="sla-in"><label><i style="background:var(--sev-' + s + ')"></i>' + SEV_LABEL[s] + '</label><div class="wrap"><input type="number" min="1" max="3650" id="f-sla-' + s + '" value="' + v.sla[s] + '"><span class="u">days</span></div></div>';
+          return '<div class="sla-in"><label><i style="background:' + SEVCOL[s] + '"></i>' + SEV_LABEL[s] + '</label><div class="wrap"><input type="number" min="1" max="3650" id="f-sla-' + s + '" value="' + v.sla[s] + '"><span class="u">days</span></div></div>';
         }).join('') + '</div></div>';
     } else if (t === 'tasks') {
       h = '<h2>' + (isNew ? 'New task' : 'Edit task') + '</h2>' + fld('Task', '<input type="text" id="f-title" value="' + esc(v.title) + '" placeholder="Patch review with IT">') +
@@ -349,10 +418,10 @@
         fld('Severity', '<select id="f-sev">' + SEV.map(function (s) { return '<option value="' + s + '"' + (v.severity === s ? ' selected' : '') + '>' + SEV_LABEL[s] + '</option>'; }).join('') + '</select>') + '</div>' +
         '<div class="frow">' + fld('Company', coSelect(v.companyId)) + fld('Status', '<select id="f-status"><option value="open"' + (v.status === 'open' ? ' selected' : '') + '>Open</option><option value="fixed"' + (v.status === 'fixed' ? ' selected' : '') + '>Fixed</option><option value="accepted"' + (v.status === 'accepted' ? ' selected' : '') + '>Accepted risk</option></select>') + '</div>' +
         '<div class="frow">' + fld('Discovered', dateBtn('discovered', v.discovered, 'Pick a date')) + fld('Due date', dateBtn('dueOverride', v.dueOverride, 'Auto from SLA')) + '</div>' +
-        '<div class="hint" id="sla-hint" style="margin:-6px 0 12px"></div>' + fld('Notes', '<textarea id="f-notes" placeholder="Affected hosts, ticket link, remediation plan">' + esc(v.notes) + '</textarea>');
+        '<div class="hint" id="sla-hint" style="margin:-6px 0 14px"></div>' + fld('Notes', '<textarea id="f-notes" placeholder="Affected hosts, ticket link, remediation plan">' + esc(v.notes) + '</textarea>');
     }
     h += '<div class="form-err" id="form-err"></div><div class="modal-actions">' +
-      (!isNew && t !== 'company' ? '<button class="btn ghost danger" data-m="delete">Delete</button>' : '') + '<span class="sp"></span><button class="btn" data-m="cancel">Cancel</button><button class="btn primary" data-m="save">' + (isNew ? 'Add' : 'Save') + '</button></div>';
+      (!isNew && t !== 'company' ? '<button class="btn ghost danger" data-m="delete">Delete</button>' : '') + '<span class="sp"></span><button class="btn" data-m="cancel">Cancel</button><button class="btn white" data-m="save">' + (isNew ? 'Add' : 'Save') + '</button></div>';
     $('#modal-root').innerHTML = '<div class="scrim" data-m="scrim"><div class="modal" role="dialog" aria-modal="true">' + h + '</div></div>';
     if (t === 'vulns') updateHint();
   }
@@ -376,11 +445,11 @@
       if (!name) return err('Enter a company name.');
       var sla = {};
       SEV.forEach(function (s) { sla[s] = Math.max(1, parseInt(g('f-sla-' + s), 10) || D.DEFAULT_SLA[s]); });
-      var c = { id: D.uid(), name: name, sla: sla, created: Date.now() };
-      S.data.companies.push(c);
+      S.data.companies.push({ id: D.uid(), name: name, sla: sla, created: Date.now() });
       S.company = 'all';
       closeModal();
-      return persist();
+      persist();
+      return D.toast(NEWLABEL.company);
     }
     v.title = g('f-title');
     if (!v.title) return err('Enter a title.');
@@ -393,6 +462,7 @@
       if (v.status === 'fixed' && !v.fixedOn) v.fixedOn = today();
       if (v.status !== 'fixed') v.fixedOn = '';
     }
+    var isNew = !M.id;
     if (M.id) {
       var i = S.data[t].findIndex(function (x) { return x.id === M.id; });
       if (i >= 0) S.data[t][i] = Object.assign({}, S.data[t][i], v);
@@ -402,6 +472,7 @@
     }
     closeModal();
     persist();
+    if (isNew) D.toast(NEWLABEL[t]);
   }
 
   function hasSample() {
@@ -440,25 +511,89 @@
     persist();
   }
 
-  function newMenu(btn) {
+  function menuEl(html, handler) {
     var el = document.createElement('div');
     el.className = 'popover menu';
-    el.innerHTML = [['tasks', 'check', 'Task'], ['followups', 'reply', 'Follow up'], ['vulns', 'shield', 'Vulnerability']].map(function (i) {
-      return '<button data-newmenu="' + i[0] + '">' + icon(i[1], 16) + i[2] + '</button>';
-    }).join('');
-    el.addEventListener('click', function (e) {
-      var b = e.target.closest('[data-newmenu]');
-      if (!b) return;
-      D.closePopover();
-      openModal(b.dataset.newmenu);
-    });
+    el.innerHTML = html;
+    el.addEventListener('click', handler);
+    return el;
+  }
+  function mbtn(attr, val, ic, label) { return '<button ' + attr + '="' + val + '">' + icon(ic, 16) + label + '</button>'; }
+
+  function newMenu(btn) {
+    var el = menuEl(
+      mbtn('data-newmenu', 'tasks', 'check', 'Task') + mbtn('data-newmenu', 'followups', 'reply', 'Follow up') + mbtn('data-newmenu', 'vulns', 'shield', 'Vulnerability') + '<div class="sep"></div>' + mbtn('data-newmenu', 'company', 'timer', 'Company and SLAs'),
+      function (e) {
+        var b = e.target.closest('[data-newmenu]');
+        if (!b) return;
+        D.closePopover();
+        openModal(b.dataset.newmenu);
+      });
     D.showPopover(btn, el, { alignRight: true });
   }
 
-  function newForTab() {
-    if (S.tab === 'dashboard') return newMenu($('[data-act=new]'));
+  function newForTab(btn) {
+    if (S.tab === 'dashboard') return newMenu(btn);
     if (S.tab === 'slas') return openModal('company');
     openModal(S.tab);
+  }
+
+  function brandMenu(btn) {
+    var h = '';
+    [['dashboard', 'dash'], ['vulns', 'shield'], ['slas', 'timer'], ['tasks', 'check'], ['followups', 'reply']].forEach(function (i) {
+      h += mbtn('data-mgo', i[0], i[1], TITLES[i[0]]);
+    });
+    h += '<div class="sep"></div>';
+    if (api.web) h += mbtn('data-mact', 'quick', 'plus', 'Quick add window');
+    if (!hasAnyData()) h += mbtn('data-mact', 'sample', 'plus', 'Load sample data');
+    if (hasSample()) h += mbtn('data-mact', 'clear-sample', 'trash', 'Remove sample data');
+    h += mbtn('data-mact', 'export', 'download', 'Export backup') + mbtn('data-mact', 'import', 'upload', 'Import backup');
+    if (api.web) h += mbtn('data-mact', 'disconnect', 'undo', 'Disconnect GitHub');
+    h += '<div class="menu-tip">' + (api.web ? 'Open quick add in a small window with the menu or Alt+Shift+A.' : 'Quick add from anywhere with the tray icon or ' + (api.platform === 'darwin' ? 'Cmd' : 'Ctrl') + '+Shift+A.') + ' Search with ' + (api.platform === 'darwin' ? 'Cmd' : 'Ctrl') + '+K.</div>';
+    var el = menuEl(h, function (e) {
+      var g = e.target.closest('[data-mgo]');
+      if (g) { D.closePopover(); return go(g.dataset.mgo); }
+      var a = e.target.closest('[data-mact]');
+      if (a) { D.closePopover(); doAct(a.dataset.mact, a); }
+    });
+    D.showPopover(btn, el);
+  }
+
+  function findF(id) { return S.data.followups.find(function (x) { return x.id === id; }); }
+  function heroDone(id) {
+    var f = findF(id);
+    if (!f) return;
+    f.done = true; f.doneOn = today();
+    persist();
+    D.toast('Follow up marked done', 'Undo', function () {
+      var g = findF(id);
+      if (g) { g.done = false; g.doneOn = ''; persist(); }
+    });
+  }
+  function snoozeTo(id, d) {
+    var f = findF(id);
+    if (!f) return;
+    var prev = f.due;
+    f.due = d;
+    persist();
+    D.toast('Snoozed until ' + fmtShort(d), 'Undo', function () {
+      var g = findF(id);
+      if (g) { g.due = prev; persist(); }
+    });
+  }
+  function snoozeMenu(btn, id) {
+    var el = menuEl(
+      mbtn('data-sn', '1', 'clock', 'Tomorrow') + mbtn('data-sn', '3', 'clock', 'In 3 days') + mbtn('data-sn', '7', 'clock', 'Next week') + '<div class="sep"></div>' + mbtn('data-sn', 'pick', 'cal', 'Pick a date'),
+      function (e) {
+        var b = e.target.closest('[data-sn]');
+        if (!b) return;
+        D.closePopover();
+        if (b.dataset.sn === 'pick') {
+          var f = findF(id);
+          D.openPicker(btn, { value: f ? f.due : '', onPick: function (d) { if (d) snoozeTo(id, d); } });
+        } else snoozeTo(id, addDays(today(), parseInt(b.dataset.sn, 10)));
+      });
+    D.showPopover(btn, el);
   }
 
   function pickInto(btn, key) {
@@ -477,6 +612,128 @@
   }
 
   function splitRef(s) { var p = s.split(':'); return { kind: p[0], id: p[1] }; }
+
+  var KLABEL = { tasks: 'Add task', followups: 'Add follow up', vulns: 'Add vuln' };
+  function srHay(x) {
+    return ((x.title || '') + ' ' + (x.cve || '') + ' ' + (x.who || '') + ' ' + (x.notes || '') + ' ' + (x.companyId ? coName(x.companyId) : '')).toLowerCase();
+  }
+  function buildRows(q) {
+    var toks = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!toks.length) return [];
+    var hits = [];
+    ['vulns', 'followups', 'tasks'].forEach(function (k) {
+      S.data[k].forEach(function (x) {
+        var h = srHay(x);
+        if (toks.every(function (t) { return h.indexOf(t) >= 0; })) hits.push({ kind: 'item', type: k, item: x });
+      });
+    });
+    S.data.companies.forEach(function (c) {
+      var h = c.name.toLowerCase();
+      if (toks.every(function (t) { return h.indexOf(t) >= 0; })) hits.push({ kind: 'company', item: c });
+    });
+    function rank(r) {
+      if (r.kind === 'company') return 0;
+      if (r.type === 'vulns') return r.item.status === 'open' ? 0 : 1;
+      return r.item.done ? 1 : 0;
+    }
+    hits.sort(function (a, b) { return rank(a) - rank(b); });
+    var rows = hits.slice(0, 6);
+    rows.push({ kind: 'add', type: 'tasks' }, { kind: 'add', type: 'followups' }, { kind: 'add', type: 'vulns' });
+    return rows;
+  }
+  function srRow(r, i, q) {
+    var on = i === SR.idx ? ' on' : '';
+    if (r.kind === 'add') {
+      return '<div class="sr-row sr-add' + on + '" data-sr="' + i + '"><span class="sr-kind">' + KLABEL[r.type] + '</span><div class="sr-main"><div class="sr-title"><q>' + esc(q.trim()) + '</q></div></div></div>';
+    }
+    if (r.kind === 'company') {
+      return '<div class="sr-row' + on + '" data-sr="' + i + '"><span class="sr-kind">Company</span><div class="sr-main"><div class="sr-title">' + esc(r.item.name) + '</div><div class="sr-sub">Open SLA targets</div></div></div>';
+    }
+    var x = r.item;
+    var sub = [];
+    if (x.companyId) sub.push(esc(coName(x.companyId)));
+    if (r.type === 'vulns') { var d = effDue(x); sub.push(vStatus(x).t + (d ? ', due ' + fmtShort(d) : '')); }
+    else sub.push(x.done ? 'Done' : (x.due ? 'Due ' + fmtShort(x.due) : 'No date'));
+    return '<div class="sr-row' + on + '" data-sr="' + i + '"><span class="sr-kind">' + KIND[r.type] + '</span><div class="sr-main"><div class="sr-title">' + esc(x.title) + '</div><div class="sr-sub">' + sub.join(' · ') + '</div></div></div>';
+  }
+  function renderSearch() {
+    var pop = $('#search-pop'), inp = $('#q');
+    if (!pop || !inp) return;
+    var q = inp.value;
+    if (!q.trim()) {
+      SR.rows = []; SR.idx = -1;
+      pop.innerHTML = '<div class="sr-hint">Search tasks, follow ups, vulnerabilities, and companies. Or type something new and press Return to add it as a task.</div>';
+      pop.hidden = document.activeElement !== inp;
+      return;
+    }
+    SR.rows = buildRows(q);
+    if (SR.idx >= SR.rows.length) SR.idx = -1;
+    var firstAdd = SR.rows.findIndex(function (r) { return r.kind === 'add'; });
+    var h = '', i;
+    if (firstAdd > 0) {
+      h += '<div class="sr-sec">Results</div>';
+      for (i = 0; i < firstAdd; i++) h += srRow(SR.rows[i], i, q);
+    }
+    h += '<div class="sr-sec">Add new</div>';
+    for (i = firstAdd; i < SR.rows.length; i++) h += srRow(SR.rows[i], i, q);
+    h += '<div class="sr-foot">Return adds a task. Use the arrow keys to choose something else.</div>';
+    pop.innerHTML = h;
+    pop.hidden = false;
+    var on = pop.querySelector('.sr-row.on');
+    if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest' });
+  }
+  function closeSearch(clear) {
+    var inp = $('#q'), pop = $('#search-pop');
+    if (pop) pop.hidden = true;
+    if (inp) { if (clear) inp.value = ''; inp.blur(); }
+    SR.idx = -1; SR.rows = [];
+  }
+  function activateRow(i) {
+    var r = SR.rows[i];
+    var inp = $('#q');
+    if (!r || !inp) return;
+    var q = inp.value.trim();
+    closeSearch(true);
+    if (r.kind === 'add') openModal(r.type, null, { title: q });
+    else if (r.kind === 'company') go('slas');
+    else openModal(r.type, r.item.id);
+  }
+
+  function addFromComposer() {
+    var ti = $('#comp-title');
+    if (!ti) return;
+    var title = ti.value.trim();
+    if (!title) { ti.focus(); return; }
+    var kind = S.tab;
+    var defCo = S.company !== 'all' ? S.company : '';
+    var item = { id: D.uid(), title: title, companyId: S.draft.co === null ? defCo : S.draft.co, due: S.draft.due || '', notes: '', done: false, created: Date.now() };
+    if (kind === 'followups') item.who = '';
+    S.data[kind].push(item);
+    S.draft = { title: '', co: S.draft.co, due: '' };
+    persist();
+    var again = $('#comp-title');
+    if (again) again.focus();
+  }
+
+  function doAct(act, el) {
+    if (act === 'menu') return brandMenu(el);
+    if (act === 'new') return newForTab(el);
+    if (act === 'new-followup') return openModal('followups');
+    if (act === 'newco') return openModal('company');
+    if (act === 'sample') return loadSample();
+    if (act === 'clear-sample') { if (confirm('Remove all sample companies and items?')) clearSample(); return; }
+    if (act === 'toggle-done') { S.showDone = !S.showDone; return render(); }
+    if (act === 'comp-add') return addFromComposer();
+    if (act === 'export') return api.exportData();
+    if (act === 'import') return api.importData().then(function (d) { if (d) { S.data = d; render(); } });
+    if (act === 'quick') return api.openQuick();
+    if (act === 'disconnect') { if (confirm('Disconnect this browser from GitHub? Your data stays in the repository.')) api.disconnect(); return; }
+    if (act === 'hero-done') return heroDone(el.dataset.id);
+    if (act === 'hero-snooze') return snoozeMenu(el, el.dataset.id);
+    if (act === 'week-prev') { S.weekOff--; return render(); }
+    if (act === 'week-next') { S.weekOff++; return render(); }
+    if (act === 'week-today') { S.weekOff = 0; return render(); }
+  }
 
   document.addEventListener('click', function (e) {
     var t = e.target;
@@ -522,64 +779,41 @@
       }
       return;
     }
-    var op = t.closest('[data-open]');
-    if (op) { var rr = splitRef(op.dataset.open); return openModal(rr.kind, rr.id); }
-    var vf = t.closest('[data-vf]');
-    if (vf) { S.vf = vf.dataset.vf; if (vf.dataset.go) S.tab = vf.dataset.go; return render(); }
-    var go = t.closest('[data-go]');
-    if (go) { S.tab = go.dataset.go; return render(); }
-    var cal = t.closest('[data-cal]');
-    if (cal) {
-      S.calM += cal.dataset.cal === 'next' ? 1 : -1;
-      if (S.calM > 11) { S.calM = 0; S.calY++; }
-      if (S.calM < 0) { S.calM = 11; S.calY--; }
-      return render();
-    }
-    var dd = t.closest('.mini-cal [data-date]');
-    if (dd) { S.calSel = dd.dataset.date; return render(); }
+    var ac = t.closest('[data-act]');
+    if (ac && ac.dataset.act !== 'company') return doAct(ac.dataset.act, ac);
+    var dy = t.closest('[data-day]');
+    if (dy) return dayPopover(dy, dy.dataset.day);
+    var sr = t.closest('[data-sr]');
+    if (sr) return activateRow(parseInt(sr.dataset.sr, 10));
     var cd = t.closest('#comp-due');
     if (cd) {
       return D.openPicker(cd, {
-        value: cd.dataset.val, clearable: true,
-        onPick: function (d) { cd.dataset.val = d; var sp = cd.querySelector('span'); sp.textContent = d ? fmtShort(d) : 'Due date'; sp.className = d ? '' : 'ph'; var ti = $('#comp-title'); if (ti) ti.focus(); }
+        value: S.draft.due, clearable: true,
+        onPick: function (d) {
+          S.draft.due = d;
+          var sp = cd.querySelector('span'); sp.textContent = d ? fmtShort(d) : 'Due date'; sp.className = d ? '' : 'ph';
+          var ti = $('#comp-title'); if (ti) ti.focus();
+        }
       });
     }
-    var ac = t.closest('[data-act]');
-    if (!ac) return;
-    var act = ac.dataset.act;
-    if (act === 'new') newForTab();
-    else if (act === 'newco') openModal('company');
-    else if (act === 'sample') loadSample();
-    else if (act === 'clear-sample') { if (confirm('Remove all sample companies and items?')) clearSample(); }
-    else if (act === 'toggle-done') { S.showDone = !S.showDone; render(); }
-    else if (act === 'comp-add') addFromComposer();
-    else if (act === 'quick') api.openQuick();
-    else if (act === 'disconnect') { if (confirm('Disconnect this browser from GitHub? Your data stays in the repository.')) api.disconnect(); }
-    else if (act === 'export') api.exportData();
-    else if (act === 'import') api.importData().then(function (d) { if (d) { S.data = d; render(); } });
+    var op = t.closest('[data-open]');
+    if (op) { var rr = splitRef(op.dataset.open); return openModal(rr.kind, rr.id); }
+    var vf = t.closest('[data-vf]');
+    if (vf) { S.vf = vf.dataset.vf; if (vf.dataset.go) go(vf.dataset.go); else render(); return; }
+    var gg = t.closest('[data-go]');
+    if (gg) return go(gg.dataset.go);
   });
-
-  function addFromComposer() {
-    var ti = $('#comp-title');
-    if (!ti) return;
-    var title = ti.value.trim();
-    if (!title) { ti.focus(); return; }
-    var kind = S.tab;
-    var item = { id: D.uid(), title: title, companyId: $('#comp-co').value, due: $('#comp-due').dataset.val || '', notes: '', done: false, created: Date.now() };
-    if (kind === 'followups') item.who = '';
-    S.data[kind].push(item);
-    persist();
-    var again = $('#comp-title');
-    if (again) again.focus();
-  }
 
   document.addEventListener('change', function (e) {
     var t = e.target;
-    if (t.matches('[data-act=company]')) { S.company = t.value; render(); return; }
+    if (t.matches && t.matches('[data-act=company]')) { S.company = t.value; render(); return; }
+    if (t.id === 'comp-co') { S.draft.co = t.value; return; }
     if (M && (t.id === 'f-company' || t.id === 'f-sev')) updateHint();
   });
   document.addEventListener('input', function (e) {
     var t = e.target;
+    if (t.id === 'q') { SR.idx = -1; return renderSearch(); }
+    if (t.id === 'comp-title') { S.draft.title = t.value; return; }
     if (t.dataset && t.dataset.sla) {
       var p = t.dataset.sla.split(':');
       var c = co(p[0]);
@@ -590,14 +824,33 @@
       if (c2 && t.value.trim()) { c2.name = t.value.trim(); saveQuiet(); }
     }
   });
+  document.addEventListener('focusin', function (e) { if (e.target.id === 'q') renderSearch(); });
+  document.addEventListener('mousedown', function (e) {
+    var pop = $('#search-pop');
+    if (pop && !pop.hidden && !e.target.closest('#search')) pop.hidden = true;
+  });
   document.addEventListener('keydown', function (e) {
+    if (e.target && e.target.id === 'q' && !M) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); SR.idx = SR.rows.length ? (SR.idx + 1) % SR.rows.length : -1; renderSearch(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); SR.idx = SR.rows.length ? (SR.idx <= 0 ? SR.rows.length - 1 : SR.idx - 1) : -1; renderSearch(); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (e.isComposing || !e.target.value.trim()) return;
+        activateRow(SR.idx >= 0 ? SR.idx : SR.rows.findIndex(function (r) { return r.kind === 'add'; }));
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        if (e.target.value) { e.target.value = ''; SR.idx = -1; renderSearch(); } else closeSearch(false);
+      }
+      return;
+    }
     if (e.key === 'Escape' && M) { closeModal(); return; }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       if (M && e.target.tagName === 'INPUT') { e.preventDefault(); saveModal(); }
       else if (e.target.id === 'comp-title') { e.preventDefault(); addFromComposer(); }
     }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !M) { e.preventDefault(); var q = $('#q'); if (q) { q.focus(); q.select(); } return; }
     if (api.web && e.altKey && e.shiftKey && e.code === 'KeyA') { e.preventDefault(); api.openQuick(); return; }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !M) { e.preventDefault(); newForTab(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && !M) { e.preventDefault(); newForTab($('[data-act=new]')); }
   });
 
   api.onChanged(function (d) { S.data = normalize(d); render(); });
