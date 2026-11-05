@@ -169,8 +169,8 @@
       (hasAnyData() ? '' : '<button class="btn" data-act="sample">Load sample data</button>') + '</div></div>';
     var tiles = '<div class="tiles">' +
       tile('vulns', 'Vulnerabilities', openV.length, '', 'open', 'open') +
-      tile('vulns', 'SLA breached', breached.length, breached.length ? 'red' : '', breached.length ? 'past due' : 'nothing past due', 'breached') +
-      tile(odF > odT ? 'followups' : 'tasks', 'Overdue', overdue, overdue ? 'amber' : '', 'tasks, follow ups') +
+      tile('followups', 'Follow ups', openF.length, '', 'open') +
+      tile(odF > odT ? 'followups' : 'tasks', 'Overdue', overdue, overdue > 5 ? 'red' : overdue ? 'amber' : '', 'tasks, follow ups') +
       tile('tasks', 'Tasks', openT.length, '', 'open') + '</div>';
     return '<div class="dash">' + banner + heroCard(openF) + calCard(openV, openT, openF) + tiles + slaCard() + '</div>';
   }

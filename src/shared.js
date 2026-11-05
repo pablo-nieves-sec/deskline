@@ -142,7 +142,7 @@
     var el = document.createElement('div');
     el.className = 'popover datepicker';
     function render() {
-      el.innerHTML = calHTML(vy, vm, { sel: o.value }) +
+      el.innerHTML = calHTML(vy, vm, { sel: o.value || today() }) +
         '<div class="cal-quick"><button type="button" data-quick="today">Today</button><button type="button" data-quick="tomorrow">Tomorrow</button><button type="button" data-quick="week">Next week</button>' +
         (o.clearable ? '<button type="button" data-quick="clear" class="muted">' + (o.clearLabel || 'Clear') + '</button>' : '') + '</div>';
     }
